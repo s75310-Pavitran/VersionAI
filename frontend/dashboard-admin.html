@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — UMT LMS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+  <!-- Navbar -->
+  <nav class="bg-white shadow-sm px-8 py-4 flex justify-between items-center sticky top-0 z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-rose-600 rounded-lg flex items-center justify-center">
+        <span class="text-white font-bold">U</span>
+      </div>
+      <span class="font-bold text-slate-800">UMT LMS</span>
+      <span class="text-xs bg-rose-100 text-rose-600 px-2 py-0.5 rounded-full font-semibold ml-2">Administrator</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="userName" class="text-sm text-slate-600 font-medium"></span>
+      <button onclick="logout()" class="text-sm font-semibold text-red-500 hover:text-red-700">Logout</button>
+    </div>
+  </nav>
+
+  <!-- Tab Nav -->
+  <div class="bg-white border-b border-slate-100 px-8">
+    <div class="flex gap-0 max-w-6xl mx-auto">
+      <button onclick="showTab('overview')" id="tab-overview"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-rose-600 text-rose-600">
+        System Overview
+      </button>
+      <button onclick="showTab('users')" id="tab-users"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+        User Management
+      </button>
+      <button onclick="showTab('courses')" id="tab-courses"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+        Course Management
+      </button>
+      <button onclick="showTab('add-user')" id="tab-add-user"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+        Add User
+      </button>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto p-8">
+
+    <!-- System Overview -->
+    <div id="pane-overview">
+      <h2 class="text-2xl font-extrabold text-slate-800 mb-6">System Overview</h2>
+      <div id="stats-grid" class="grid grid-cols-2 md:grid-cols-4 gap-5 mb-8"></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 class="font-bold text-slate-700 mb-3">Recent Users</h3>
+          <div id="recent-users"></div>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+          <h3 class="font-bold text-slate-700 mb-3">Recent Courses</h3>
+          <div id="recent-courses"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Management -->
+    <div id="pane-users" class="hidden">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-extrabold text-slate-800">User Management</h2>
+        <div class="flex gap-3 items-center">
+          <input id="user-search" onkeyup="filterUsers()" type="text" placeholder="Search by name or email..."
+            class="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300 w-56">
+          <select id="role-filter" onchange="filterUsers()"
+            class="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none">
+            <option value="">All Roles</option>
+            <option value="student">Student</option>
+            <option value="instructor">Instructor</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
+            <tr>
+              <th class="px-6 py-3 text-left">Name</th>
+              <th class="px-6 py-3 text-left">Email</th>
+              <th class="px-6 py-3 text-left">Role</th>
+              <th class="px-6 py-3 text-left">Status</th>
+              <th class="px-6 py-3 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-table" class="divide-y divide-slate-50"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Course Management -->
+    <div id="pane-courses" class="hidden">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-extrabold text-slate-800">All Courses</h2>
+        <button onclick="loadAdminCourses()" class="text-sm text-rose-600 font-semibold hover:underline">↻ Refresh</button>
+      </div>
+      <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-xs font-bold uppercase tracking-wider">
+            <tr>
+              <th class="px-6 py-3 text-left">Course Title</th>
+              <th class="px-6 py-3 text-left">Instructor</th>
+              <th class="px-6 py-3 text-left">Students</th>
+              <th class="px-6 py-3 text-left">Status</th>
+              <th class="px-6 py-3 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="courses-table" class="divide-y divide-slate-50"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Add User -->
+    <div id="pane-add-user" class="hidden max-w-md">
+      <h2 class="text-2xl font-extrabold text-slate-800 mb-6">Create New User</h2>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
+        <div>
+          <label class="text-sm font-semibold text-slate-600 block mb-1">Full Name *</label>
+          <input id="nu-name" type="text" class="w-full border border-slate-200 p-3 rounded-lg text-sm focus:ring-2 focus:ring-rose-300 outline-none">
+        </div>
+        <div>
+          <label class="text-sm font-semibold text-slate-600 block mb-1">Email *</label>
+          <input id="nu-email" type="email" class="w-full border border-slate-200 p-3 rounded-lg text-sm focus:ring-2 focus:ring-rose-300 outline-none">
+        </div>
+        <div>
+          <label class="text-sm font-semibold text-slate-600 block mb-1">Password *</label>
+          <input id="nu-pass" type="password" class="w-full border border-slate-200 p-3 rounded-lg text-sm focus:ring-2 focus:ring-rose-300 outline-none">
+        </div>
+        <div>
+          <label class="text-sm font-semibold text-slate-600 block mb-1">Role *</label>
+          <select id="nu-role" class="w-full border border-slate-200 p-3 rounded-lg text-sm outline-none">
+            <option value="student">Student</option>
+            <option value="instructor">Instructor</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+        <button onclick="createUser()"
+          class="w-full bg-rose-600 text-white py-3 rounded-lg font-bold hover:bg-rose-700 transition">
+          Create User
+        </button>
+        <p id="nu-status" class="text-center text-sm font-semibold"></p>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Reset Password Modal -->
+  <div id="reset-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex">
+    <div class="bg-white rounded-2xl p-6 w-80 shadow-2xl">
+      <h3 class="text-lg font-bold text-slate-800 mb-4">Reset Password</h3>
+      <input id="new-pass" type="password" placeholder="New password (min 6 chars)"
+        class="w-full border border-slate-200 p-3 rounded-lg text-sm mb-4 focus:ring-2 focus:ring-rose-300 outline-none">
+      <input id="reset-uid" type="hidden">
+      <div class="flex gap-3">
+        <button onclick="confirmReset()" class="flex-1 bg-rose-600 text-white py-2 rounded-lg font-bold hover:bg-rose-700">Reset</button>
+        <button onclick="closeReset()" class="flex-1 border border-slate-200 py-2 rounded-lg font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+      </div>
+      <p id="reset-status" class="text-center text-sm font-semibold mt-3"></p>
+    </div>
+  </div>
+
+  <script>
+    const API   = 'http://localhost:5000/api';
+    const token = localStorage.getItem('lms_token');
+    const user  = JSON.parse(localStorage.getItem('lms_user') || 'null');
+
+    if (!user || user.role !== 'admin') {
+      localStorage.clear(); window.location.href = 'index.html';
+    }
+    document.getElementById('userName').innerText = user.name;
+
+    let allUsers   = [];
+    let allCourses = [];
+
+    // ── Tabs ────────────────────────────────────────────────────────────
+    function showTab(tab) {
+      ['overview','users','courses','add-user'].forEach(t => {
+        document.getElementById('pane-' + t).classList.add('hidden');
+        document.getElementById('tab-' + t).className =
+          'tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+      });
+      document.getElementById('pane-' + tab).classList.remove('hidden');
+      document.getElementById('tab-' + tab).className =
+        'tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-rose-600 text-rose-600';
+      if (tab === 'overview') loadOverview();
+      if (tab === 'users')    loadUsers();
+      if (tab === 'courses')  loadAdminCourses();
+    }
+
+    // ── Overview ────────────────────────────────────────────────────────
+    async function loadOverview() {
+      try {
+        const [uRes, cRes] = await Promise.all([
+          fetch(`${API}/auth/users`,       { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API}/courses/admin/all`,{ headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        const users   = await uRes.json();
+        const courses = await cRes.json();
+
+        const students    = users.filter(u => u.role === 'student').length;
+        const instructors = users.filter(u => u.role === 'instructor').length;
+        const admins      = users.filter(u => u.role === 'admin').length;
+        const published   = courses.filter(c => c.isPublished).length;
+
+        document.getElementById('stats-grid').innerHTML = `
+          ${stat(users.length,     'Total Users',       'bg-blue-50 text-blue-600')}
+          ${stat(students,         'Students',          'bg-emerald-50 text-emerald-600')}
+          ${stat(instructors,      'Instructors',       'bg-violet-50 text-violet-600')}
+          ${stat(courses.length,   'Total Courses',     'bg-amber-50 text-amber-600')}`;
+
+        document.getElementById('recent-users').innerHTML = users.slice(0,5).map(u => `
+          <div class="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+            <div>
+              <p class="font-medium text-slate-700 text-sm">${u.name}</p>
+              <p class="text-xs text-slate-400">${u.email}</p>
+            </div>
+            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${roleBadge(u.role)}">${u.role}</span>
+          </div>`).join('');
+
+        document.getElementById('recent-courses').innerHTML = courses.slice(0,5).map(c => `
+          <div class="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+            <p class="font-medium text-slate-700 text-sm">${c.title}</p>
+            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${c.isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
+              ${c.isPublished ? 'Live' : 'Draft'}
+            </span>
+          </div>`).join('');
+      } catch { /* silent */ }
+    }
+
+    function stat(val, label, cls) {
+      return `<div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm text-center">
+        <div class="text-3xl font-extrabold ${cls.split(' ')[1]}">${val}</div>
+        <div class="text-xs text-slate-500 mt-1 font-semibold uppercase tracking-wider">${label}</div>
+      </div>`;
+    }
+
+    // ── Users ───────────────────────────────────────────────────────────
+    async function loadUsers() {
+      const tbody = document.getElementById('users-table');
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400">Loading...</td></tr>';
+      try {
+        const res  = await fetch(`${API}/auth/users`, { headers: { Authorization: `Bearer ${token}` } });
+        allUsers   = await res.json();
+        renderUsersTable(allUsers);
+      } catch {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Failed to load.</td></tr>';
+      }
+    }
+
+    function filterUsers() {
+      const q    = document.getElementById('user-search').value.toLowerCase();
+      const role = document.getElementById('role-filter').value;
+      renderUsersTable(allUsers.filter(u =>
+        (!role || u.role === role) &&
+        (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      ));
+    }
+
+    function renderUsersTable(users) {
+      const tbody = document.getElementById('users-table');
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400">No users found.</td></tr>'; return;
+      }
+      tbody.innerHTML = users.map(u => `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="px-6 py-4 font-medium text-slate-800">${u.name}</td>
+          <td class="px-6 py-4 text-slate-500">${u.email}</td>
+          <td class="px-6 py-4">
+            <select onchange="changeRole('${u._id}', this.value)"
+              class="text-xs font-bold border border-slate-200 rounded-lg px-2 py-1 ${roleBadge(u.role)} outline-none">
+              <option value="student"    ${u.role==='student'    ?'selected':''}>Student</option>
+              <option value="instructor" ${u.role==='instructor' ?'selected':''}>Instructor</option>
+              <option value="admin"      ${u.role==='admin'      ?'selected':''}>Admin</option>
+            </select>
+          </td>
+          <td class="px-6 py-4">
+            <span class="text-xs font-bold px-2 py-1 rounded-full ${u.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}">
+              ${u.isActive ? 'Active' : 'Disabled'}
+            </span>
+          </td>
+          <td class="px-6 py-4">
+            <div class="flex gap-2">
+              <button onclick="toggleStatus('${u._id}', ${u.isActive})"
+                class="text-xs font-bold px-2 py-1 rounded ${u.isActive ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}">
+                ${u.isActive ? 'Disable' : 'Enable'}
+              </button>
+              <button onclick="openReset('${u._id}')"
+                class="text-xs font-bold px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200">
+                Reset PW
+              </button>
+              <button onclick="deleteUser('${u._id}', '${u.name}')"
+                class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
+                Delete
+              </button>
+            </div>
+          </td>
+        </tr>`).join('');
+    }
+
+    async function toggleStatus(id, current) {
+      await fetch(`${API}/auth/users/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isActive: !current })
+      });
+      loadUsers();
+    }
+
+    async function changeRole(id, role) {
+      await fetch(`${API}/auth/users/${id}/role`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ role })
+      });
+      loadUsers();
+    }
+
+    function openReset(id) {
+      document.getElementById('reset-uid').value       = id;
+      document.getElementById('new-pass').value        = '';
+      document.getElementById('reset-status').innerText = '';
+      document.getElementById('reset-modal').classList.remove('hidden');
+    }
+    function closeReset() { document.getElementById('reset-modal').classList.add('hidden'); }
+
+    async function confirmReset() {
+      const id   = document.getElementById('reset-uid').value;
+      const pass = document.getElementById('new-pass').value;
+      const st   = document.getElementById('reset-status');
+      try {
+        const res  = await fetch(`${API}/auth/users/${id}/reset-password`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ newPassword: pass })
+        });
+        const data = await res.json();
+        st.className = res.ok ? 'text-center text-sm font-semibold text-emerald-600'
+                               : 'text-center text-sm font-semibold text-red-500';
+        st.innerText = data.message;
+        if (res.ok) setTimeout(closeReset, 800);
+      } catch {
+        st.className = 'text-center text-sm font-semibold text-red-500';
+        st.innerText = 'Reset failed.';
+      }
+    }
+
+    async function deleteUser(id, name) {
+      if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+      await fetch(`${API}/auth/users/${id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
+      });
+      loadUsers();
+    }
+
+    // ── Admin Courses ───────────────────────────────────────────────────
+    async function loadAdminCourses() {
+      const tbody = document.getElementById('courses-table');
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400">Loading...</td></tr>';
+      try {
+        const res     = await fetch(`${API}/courses/admin/all`, { headers: { Authorization: `Bearer ${token}` } });
+        allCourses    = await res.json();
+        tbody.innerHTML = allCourses.map(c => `
+          <tr class="hover:bg-slate-50 transition">
+            <td class="px-6 py-4 font-medium text-slate-800">${c.title}</td>
+            <td class="px-6 py-4 text-slate-500">${c.instructor?.name || 'N/A'}</td>
+            <td class="px-6 py-4 text-slate-500">${c.enrolledStudents?.length || 0}</td>
+            <td class="px-6 py-4">
+              <span class="text-xs font-bold px-2 py-1 rounded-full ${c.isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
+                ${c.isPublished ? 'Published' : 'Draft'}
+              </span>
+            </td>
+            <td class="px-6 py-4">
+              <div class="flex gap-2">
+                <button onclick="adminTogglePublish('${c._id}', ${c.isPublished})"
+                  class="text-xs font-bold px-2 py-1 rounded ${c.isPublished ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}">
+                  ${c.isPublished ? 'Unpublish' : 'Publish'}
+                </button>
+                <button onclick="adminDeleteCourse('${c._id}')"
+                  class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>`).join('');
+      } catch {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Failed to load.</td></tr>';
+      }
+    }
+
+    async function adminTogglePublish(id, current) {
+      await fetch(`${API}/courses/admin/${id}/force-publish`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isPublished: !current })
+      });
+      loadAdminCourses();
+    }
+
+    async function adminDeleteCourse(id) {
+      if (!confirm('Delete this course permanently?')) return;
+      await fetch(`${API}/courses/${id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
+      });
+      loadAdminCourses();
+    }
+
+    // ── Add User ────────────────────────────────────────────────────────
+    async function createUser() {
+      const st   = document.getElementById('nu-status');
+      const name = document.getElementById('nu-name').value.trim();
+      const email= document.getElementById('nu-email').value.trim();
+      const pass = document.getElementById('nu-pass').value;
+      const role = document.getElementById('nu-role').value;
+      if (!name || !email || !pass) {
+        st.className = 'text-center text-sm font-semibold text-red-500';
+        st.innerText = 'All fields are required.'; return;
+      }
+      try {
+        const res  = await fetch(`${API}/auth/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name, email, password: pass, role })
+        });
+        const data = await res.json();
+        st.className = res.ok ? 'text-center text-sm font-semibold text-emerald-600'
+                               : 'text-center text-sm font-semibold text-red-500';
+        st.innerText = data.message;
+        if (res.ok) ['nu-name','nu-email','nu-pass'].forEach(id => document.getElementById(id).value = '');
+      } catch {
+        st.className = 'text-center text-sm font-semibold text-red-500';
+        st.innerText = 'Failed to create user.';
+      }
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────
+    function roleBadge(role) {
+      return role === 'admin' ? 'bg-rose-50 text-rose-600'
+           : role === 'instructor' ? 'bg-violet-50 text-violet-600'
+           : 'bg-blue-50 text-blue-600';
+    }
+
+    function logout() { localStorage.clear(); window.location.href = 'index.html'; }
+
+    // Initial load
+    loadOverview();
+  </script>
+</body>
+</html>

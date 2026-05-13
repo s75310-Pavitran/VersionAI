@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UMT LMS — Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 min-h-screen flex items-center justify-center">
+
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8">
+    <!-- Logo -->
+    <div class="flex items-center gap-3 mb-8">
+      <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
+        <span class="text-white font-bold text-lg">U</span>
+      </div>
+      <div>
+        <h1 class="text-xl font-extrabold text-slate-800 leading-none">UMT LMS Portal</h1>
+        <p class="text-xs text-slate-400">Learning Management System</p>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex bg-slate-100 rounded-lg p-1 mb-6">
+      <button id="tab-login" onclick="switchTab('login')"
+        class="flex-1 py-2 text-sm font-semibold rounded-md bg-white text-slate-800 shadow transition">
+        Login
+      </button>
+      <button id="tab-register" onclick="switchTab('register')"
+        class="flex-1 py-2 text-sm font-semibold rounded-md text-slate-500 transition">
+        Register
+      </button>
+    </div>
+
+    <!-- Login Form -->
+    <div id="form-login" class="space-y-4">
+      <input id="l-email" type="email" placeholder="Email address"
+        class="w-full border border-slate-200 p-3 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none text-sm">
+      <input id="l-password" type="password" placeholder="Password"
+        class="w-full border border-slate-200 p-3 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none text-sm">
+      <button onclick="handleLogin()"
+        class="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">
+        Sign In
+      </button>
+    </div>
+
+    <!-- Register Form -->
+    <div id="form-register" class="space-y-4 hidden">
+      <input id="r-name" type="text" placeholder="Full name"
+        class="w-full border border-slate-200 p-3 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none text-sm">
+      <input id="r-email" type="email" placeholder="Email address"
+        class="w-full border border-slate-200 p-3 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none text-sm">
+      <input id="r-password" type="password" placeholder="Password (min 6 chars)"
+        class="w-full border border-slate-200 p-3 rounded-lg focus:ring-2 focus:ring-indigo-400 outline-none text-sm">
+      <select id="r-role" class="w-full border border-slate-200 p-3 rounded-lg text-sm text-slate-600 outline-none">
+        <option value="student">Student</option>
+        <option value="instructor">Instructor</option>
+      </select>
+      <button onclick="handleRegister()"
+        class="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold hover:bg-emerald-700 transition">
+        Create Account
+      </button>
+    </div>
+
+    <p id="status" class="text-center text-sm font-semibold mt-5"></p>
+  </div>
+
+  <script>
+    const API = 'http://localhost:5000/api';
+
+    // If already logged in, redirect
+    const stored = localStorage.getItem('lms_user');
+    if (stored) redirectByRole(JSON.parse(stored).role);
+
+    function switchTab(tab) {
+      const isLogin = tab === 'login';
+      document.getElementById('form-login').classList.toggle('hidden', !isLogin);
+      document.getElementById('form-register').classList.toggle('hidden', isLogin);
+      document.getElementById('tab-login').className = isLogin
+        ? 'flex-1 py-2 text-sm font-semibold rounded-md bg-white text-slate-800 shadow transition'
+        : 'flex-1 py-2 text-sm font-semibold rounded-md text-slate-500 transition';
+      document.getElementById('tab-register').className = !isLogin
+        ? 'flex-1 py-2 text-sm font-semibold rounded-md bg-white text-slate-800 shadow transition'
+        : 'flex-1 py-2 text-sm font-semibold rounded-md text-slate-500 transition';
+    }
+
+    function setStatus(msg, ok) {
+      const el = document.getElementById('status');
+      el.innerText = msg;
+      el.className = `text-center text-sm font-semibold mt-5 ${ok ? 'text-emerald-600' : 'text-red-500'}`;
+    }
+
+    async function handleLogin() {
+      const email    = document.getElementById('l-email').value.trim();
+      const password = document.getElementById('l-password').value;
+      if (!email || !password) return setStatus('Please fill in all fields.', false);
+
+      try {
+        const res  = await fetch(`${API}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+
+        localStorage.setItem('lms_token', data.token);
+        localStorage.setItem('lms_user',  JSON.stringify(data.user));
+        setStatus('Login successful! Redirecting...', true);
+        setTimeout(() => redirectByRole(data.user.role), 800);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    async function handleRegister() {
+      const name     = document.getElementById('r-name').value.trim();
+      const email    = document.getElementById('r-email').value.trim();
+      const password = document.getElementById('r-password').value;
+      const role     = document.getElementById('r-role').value;
+      if (!name || !email || !password) return setStatus('All fields required.', false);
+
+      try {
+        const res  = await fetch(`${API}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+        setStatus('Account created! You can now log in.', true);
+        switchTab('login');
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    function redirectByRole(role) {
+      if (role === 'admin')      window.location.href = 'dashboard-admin.html';
+      else if (role === 'instructor') window.location.href = 'dashboard-instructor.html';
+      else                       window.location.href = 'dashboard-student.html';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LMS Dashboard - Course View</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+    <!-- Navbar Section -->
+    <nav class="bg-white shadow-md px-8 py-4 flex justify-between items-center">
+        <div class="flex items-center gap-2">
+            <div class="w-8 h-8 bg-indigo-600 rounded-lg"></div>
+            <h1 class="text-xl font-bold text-slate-800 tracking-tight">UMT LMS Portal</h1>
+        </div>
+        <div class="flex items-center gap-6">
+            <span id="userName" class="text-slate-600 font-medium"></span>
+            <button onclick="logout()" class="text-sm font-semibold text-red-500 hover:text-red-700 transition">Logout</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="p-8 max-w-6xl mx-auto">
+        
+        <!-- Header with Course Management Link -->
+        <div class="flex justify-between items-center mb-10">
+            <div>
+                <h2 class="text-3xl font-extrabold text-slate-900">Course Explorer</h2>
+                <p class="text-slate-500 mt-1">Manage and view your learning modules.</p>
+            </div>
+            
+            <div class="flex gap-3">
+                <!-- Pavitran's Module Link -->
+                <a href="manage-courses.html" class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+                    </svg>
+                    Manage My Courses
+                </a>
+                
+                <button onclick="loadCourses()" class="bg-white border border-slate-200 text-slate-700 px-5 py-2.5 rounded-lg font-bold hover:bg-slate-50 transition">
+                    Refresh List
+                </button>
+            </div>
+        </div>
+
+        <!-- Course Grid (Data from MongoDB Atlas) -->
+        <div id="courseContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <!-- Loading State -->
+            <div class="animate-pulse bg-white p-6 rounded-xl border border-slate-100">
+                <div class="h-4 bg-slate-200 rounded w-1/4 mb-4"></div>
+                <div class="h-6 bg-slate-200 rounded w-3/4 mb-2"></div>
+                <div class="h-4 bg-slate-200 rounded w-full"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Authentication Check (Adry's Logic)
+        const user = JSON.parse(localStorage.getItem('user'));
+        
+        if (!user) {
+            // If no user session found, redirect back to login
+            window.location.href = "index.html";
+        } else {
+            // Display greeting with user role
+            document.getElementById('userName').innerText = `${user.name} (${user.role})`;
+        }
+
+        // Fetch Data from Backend (Pavitran's logic)
+        async function loadCourses() {
+            const container = document.getElementById('courseContainer');
+            
+            try {
+                // Requesting data from the Business Logic Layer
+                const res = await fetch('http://localhost:5000/api/courses/all');
+                const courses = await res.json();
+                
+                if (courses.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-span-full text-center py-20 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                            <p class="text-slate-400 font-medium">No courses found in MongoDB Cloud.</p>
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = courses.map(c => `
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+                        <div class="flex justify-between items-start mb-4">
+                            <span class="bg-blue-50 text-blue-600 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
+                                Active Module
+                            </span>
+                        </div>
+                        <h3 class="text-xl font-bold text-slate-800 leading-tight">${c.title}</h3>
+                        <p class="text-slate-500 text-sm mt-3 line-clamp-3">${c.description}</p>
+                        
+                        <div class="mt-6 pt-5 border-t border-slate-50 flex justify-between items-center">
+                            <div class="flex items-center gap-2">
+                                <div class="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center">
+                                    <span class="text-[10px] font-bold text-slate-400">${c.instructor.charAt(0)}</span>
+                                </div>
+                                <span class="text-xs text-slate-400">Inst: ${c.instructor}</span>
+                            </div>
+                            <button class="text-indigo-600 text-sm font-bold hover:text-indigo-800">View →</button>
+                        </div>
+                    </div>
+                `).join('');
+
+            } catch (err) {
+                container.innerHTML = `
+                    <div class="col-span-full bg-red-50 text-red-600 p-4 rounded-lg text-center font-medium">
+                        Failed to connect to the backend server. Make sure node server.js is running.
+                    </div>`;
+            }
+        }
+
+        function logout() {
+            localStorage.clear();
+            window.location.href = "index.html";
+        }
+
+        // Initial data fetch on page load
+        loadCourses();
+    </script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LMS - Course Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-3xl font-bold text-slate-800">Course Management Service</h1>
+            <a href="dashboard.html" class="text-indigo-600 hover:underline font-medium">← Back to Dashboard</a>
+        </div>
+
+        <!-- Add Course Form (Instructor Function) -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+            <h2 class="text-lg font-semibold mb-4 text-slate-700">Deploy New Course to Cloud</h2>
+            <div class="space-y-4">
+                <input id="title" type="text" placeholder="Course Title" class="w-full border p-3 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                <textarea id="desc" placeholder="Course Description" class="w-full border p-3 rounded-lg h-28 focus:ring-2 focus:ring-indigo-500 outline-none"></textarea>
+                <button onclick="addCourse()" class="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition shadow-lg shadow-indigo-100">
+                    Create Course Structure
+                </button>
+            </div>
+            <p id="msg" class="mt-3 text-center text-sm font-medium"></p>
+        </div>
+
+        <!-- List of Courses from MongoDB Atlas -->
+        <div id="courseList" class="grid gap-4">
+            <!-- Courses load here via DAO Query -->
+        </div>
+    </div>
+
+    <script>
+        const user = JSON.parse(localStorage.getItem('user'));
+        const msg = document.getElementById('msg');
+
+        async function addCourse() {
+            const payload = {
+                title: document.getElementById('title').value,
+                description: document.getElementById('desc').value,
+                instructor: user ? user.name : "Guest Instructor"
+            };
+
+            try {
+                const res = await fetch('http://localhost:5000/api/courses/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if(res.ok) {
+                    msg.className = "mt-3 text-center text-sm font-medium text-emerald-600";
+                    msg.innerText = "Success: Course pushed to Cloud MongoDB Atlas!";
+                    loadCourses();
+                }
+            } catch (err) {
+                msg.className = "mt-3 text-center text-sm font-medium text-red-600";
+                msg.innerText = "Error: Check if server.js is running.";
+            }
+        }
+
+        async function loadCourses() {
+            const list = document.getElementById('courseList');
+            try {
+                const res = await fetch('http://localhost:5000/api/courses/all');
+                const courses = await res.json();
+                
+                list.innerHTML = courses.map(c => `
+                    <div class="bg-white p-5 rounded-lg border border-slate-100 shadow-sm flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-slate-800">${c.title}</h3>
+                            <p class="text-sm text-slate-500">${c.description}</p>
+                        </div>
+                        <span class="text-xs font-bold text-indigo-500 bg-indigo-50 px-3 py-1 rounded-full">ACTIVE</span>
+                    </div>
+                `).join('');
+            } catch (e) {
+                list.innerHTML = "<p class='text-center text-slate-400'>Connect server to load courses.</p>";
+            }
+        }
+
+        loadCourses();
+    </script>
+</body>
+</html>

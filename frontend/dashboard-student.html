@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Dashboard — UMT LMS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+  <!-- Navbar -->
+  <nav class="bg-white shadow-sm px-8 py-4 flex justify-between items-center sticky top-0 z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+        <span class="text-white font-bold">U</span>
+      </div>
+      <span class="font-bold text-slate-800">UMT LMS</span>
+      <span class="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-semibold ml-2">Student</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="userName" class="text-sm text-slate-600 font-medium"></span>
+      <button onclick="logout()" class="text-sm font-semibold text-red-500 hover:text-red-700">Logout</button>
+    </div>
+  </nav>
+
+  <!-- Tab Nav -->
+  <div class="bg-white border-b border-slate-100 px-8">
+    <div class="flex gap-0 max-w-6xl mx-auto">
+      <button onclick="showTab('browse')" id="tab-browse"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-indigo-600 text-indigo-600">
+        Browse Courses
+      </button>
+      <button onclick="showTab('my-courses')" id="tab-my-courses"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+        My Enrollments
+      </button>
+      <button onclick="showTab('summary')" id="tab-summary"
+        class="tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+        My Summary
+      </button>
+    </div>
+  </div>
+
+  <main class="max-w-6xl mx-auto p-8">
+
+    <!-- Browse Courses Tab -->
+    <div id="pane-browse">
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-extrabold text-slate-800">Available Courses</h2>
+        <button onclick="loadAllCourses()" class="text-sm text-indigo-600 font-semibold hover:underline">↻ Refresh</button>
+      </div>
+      <div id="course-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+    </div>
+
+    <!-- My Enrollments Tab -->
+    <div id="pane-my-courses" class="hidden">
+      <h2 class="text-2xl font-extrabold text-slate-800 mb-6">My Enrolled Courses</h2>
+      <div id="enrolled-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
+    </div>
+
+    <!-- Summary Tab -->
+    <div id="pane-summary" class="hidden">
+      <h2 class="text-2xl font-extrabold text-slate-800 mb-6">My Academic Summary</h2>
+      <div id="summary-content"></div>
+    </div>
+
+  </main>
+
+  <!-- Enroll Modal -->
+  <div id="enroll-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex">
+    <div class="bg-white rounded-2xl p-6 w-96 shadow-2xl">
+      <h3 id="modal-title" class="text-lg font-bold text-slate-800 mb-2"></h3>
+      <p id="modal-desc" class="text-sm text-slate-500 mb-4"></p>
+      <div class="flex gap-3">
+        <button onclick="confirmEnroll()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold hover:bg-indigo-700">
+          Enroll Now
+        </button>
+        <button onclick="closeModal()" class="flex-1 border border-slate-200 text-slate-600 py-2 rounded-lg font-bold hover:bg-slate-50">
+          Cancel
+        </button>
+      </div>
+      <p id="modal-status" class="text-center text-sm font-semibold mt-3"></p>
+    </div>
+  </div>
+
+  <script>
+    const API   = 'http://localhost:5000/api';
+    const token = localStorage.getItem('lms_token');
+    const user  = JSON.parse(localStorage.getItem('lms_user') || 'null');
+
+    if (!user || user.role !== 'student') {
+      localStorage.clear(); window.location.href = 'index.html';
+    }
+    document.getElementById('userName').innerText = user.name;
+
+    let selectedCourseId = null;
+
+    // ── Tab management ──────────────────────────────────────────────────
+    function showTab(tab) {
+      ['browse','my-courses','summary'].forEach(t => {
+        document.getElementById('pane-' + t).classList.add('hidden');
+        document.getElementById('tab-' + t).className =
+          'tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+      });
+      document.getElementById('pane-' + tab).classList.remove('hidden');
+      document.getElementById('tab-' + tab).className =
+        'tab-btn px-5 py-3 text-sm font-semibold border-b-2 border-indigo-600 text-indigo-600';
+
+      if (tab === 'browse')     loadAllCourses();
+      if (tab === 'my-courses') loadEnrolled();
+      if (tab === 'summary')    loadSummary();
+    }
+
+    // ── Browse Courses ──────────────────────────────────────────────────
+    async function loadAllCourses() {
+      const grid = document.getElementById('course-grid');
+      grid.innerHTML = '<p class="text-slate-400 col-span-3 text-center py-10">Loading...</p>';
+      try {
+        const res     = await fetch(`${API}/courses/all`);
+        const courses = await res.json();
+        if (!courses.length) {
+          grid.innerHTML = '<p class="col-span-3 text-center text-slate-400 py-10">No courses published yet.</p>';
+          return;
+        }
+        grid.innerHTML = courses.map(c => `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 hover:shadow-md transition">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">
+              ${c.category || 'General'}
+            </span>
+            <h3 class="text-lg font-bold text-slate-800 mt-3 mb-1">${c.title}</h3>
+            <p class="text-sm text-slate-500 line-clamp-2">${c.description}</p>
+            <div class="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+              <span class="text-xs text-slate-400">by ${c.instructor?.name || 'Unknown'}</span>
+              <button onclick="openEnrollModal('${c._id}','${c.title}','${c.description.replace(/'/g,"&#39;")}')"
+                class="text-sm font-bold text-indigo-600 hover:text-indigo-800">
+                Enroll →
+              </button>
+            </div>
+          </div>
+        `).join('');
+      } catch {
+        grid.innerHTML = '<p class="col-span-3 text-center text-red-500">Failed to load courses.</p>';
+      }
+    }
+
+    function openEnrollModal(id, title, desc) {
+      selectedCourseId = id;
+      document.getElementById('modal-title').innerText = title;
+      document.getElementById('modal-desc').innerText  = desc;
+      document.getElementById('modal-status').innerText = '';
+      document.getElementById('enroll-modal').classList.remove('hidden');
+    }
+    function closeModal() {
+      document.getElementById('enroll-modal').classList.add('hidden');
+    }
+
+    async function confirmEnroll() {
+      const st = document.getElementById('modal-status');
+      try {
+        const res  = await fetch(`${API}/courses/${selectedCourseId}/enroll`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+        st.className = res.ok ? 'text-center text-sm font-semibold mt-3 text-emerald-600'
+                               : 'text-center text-sm font-semibold mt-3 text-red-500';
+        st.innerText = data.message;
+        if (res.ok) setTimeout(closeModal, 1200);
+      } catch {
+        st.className = 'text-center text-sm font-semibold mt-3 text-red-500';
+        st.innerText = 'Enrollment failed.';
+      }
+    }
+
+    // ── My Enrollments ──────────────────────────────────────────────────
+    async function loadEnrolled() {
+      const list = document.getElementById('enrolled-list');
+      list.innerHTML = '<p class="text-slate-400 col-span-2 text-center py-10">Loading...</p>';
+      try {
+        const res     = await fetch(`${API}/courses/student/my-courses`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const courses = await res.json();
+        if (!courses.length) {
+          list.innerHTML = '<p class="col-span-2 text-center text-slate-400 py-10">You have not enrolled in any courses yet.</p>';
+          return;
+        }
+        list.innerHTML = courses.map(c => `
+          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <h3 class="text-lg font-bold text-slate-800">${c.title}</h3>
+            <p class="text-sm text-slate-500 mt-1">${c.description}</p>
+            <div class="mt-4 flex items-center justify-between">
+              <span class="text-xs text-slate-400">Instructor: ${c.instructor?.name || 'N/A'}</span>
+              <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">Enrolled</span>
+            </div>
+            <div class="mt-4 border-t pt-4">
+              <p class="text-xs font-bold text-slate-500 mb-2">MODULES (${c.modules?.length || 0})</p>
+              ${c.modules?.length
+                ? c.modules.map(m => `<p class="text-sm text-slate-600 py-1 border-b border-slate-50">📖 ${m.title}</p>`).join('')
+                : '<p class="text-sm text-slate-400">No modules yet.</p>'}
+            </div>
+          </div>
+        `).join('');
+      } catch {
+        list.innerHTML = '<p class="col-span-2 text-center text-red-500">Failed to load enrollments.</p>';
+      }
+    }
+
+    // ── Summary ─────────────────────────────────────────────────────────
+    async function loadSummary() {
+      const el = document.getElementById('summary-content');
+      try {
+        const res  = await fetch(`${API}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        const enrolled = data.enrolledCourses || [];
+        el.innerHTML = `
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm text-center">
+              <div class="text-4xl font-extrabold text-indigo-600">${enrolled.length}</div>
+              <div class="text-sm text-slate-500 mt-1 font-medium">Enrolled Courses</div>
+            </div>
+            <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm text-center">
+              <div class="text-4xl font-extrabold text-emerald-500">
+                ${enrolled.reduce((a,c) => a + (c.modules?.length||0), 0)}
+              </div>
+              <div class="text-sm text-slate-500 mt-1 font-medium">Total Modules</div>
+            </div>
+            <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm text-center">
+              <div class="text-4xl font-extrabold text-amber-500">${data.role}</div>
+              <div class="text-sm text-slate-500 mt-1 font-medium">Account Role</div>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+            <h3 class="font-bold text-slate-700 mb-4">Enrollment Status</h3>
+            ${enrolled.length
+              ? enrolled.map(c => `
+                  <div class="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
+                    <span class="font-medium text-slate-700">${c.title}</span>
+                    <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">Active</span>
+                  </div>`).join('')
+              : '<p class="text-slate-400 text-sm">No enrollments yet.</p>'}
+          </div>`;
+      } catch {
+        el.innerHTML = '<p class="text-red-500">Failed to load summary.</p>';
+      }
+    }
+
+    function logout() { localStorage.clear(); window.location.href = 'index.html'; }
+
+    // Initial load
+    loadAllCourses();
+  </script>
+</body>
+</html>

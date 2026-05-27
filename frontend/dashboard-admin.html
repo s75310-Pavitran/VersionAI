@@ -95,11 +95,22 @@
       </div>
     </div>
 
-    <!-- Course Management -->
+    <!-- Course Management (FR-CM-05) -->
     <div id="pane-courses" class="hidden">
       <div class="flex justify-between items-center mb-6">
-        <h2 class="text-2xl font-extrabold text-slate-800">All Courses</h2>
-        <button onclick="loadAdminCourses()" class="text-sm text-rose-600 font-semibold hover:underline">↻ Refresh</button>
+        <h2 class="text-2xl font-extrabold text-slate-800">Course Management</h2>
+        <div class="flex gap-3 items-center">
+          <input id="course-search" onkeyup="filterCourses()" type="text" placeholder="Search courses..."
+            class="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-300 w-56">
+          <select id="course-status-filter" onchange="filterCourses()"
+            class="border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none">
+            <option value="">All Status</option>
+            <option value="published">Published</option>
+            <option value="draft">Draft</option>
+            <option value="archived">Archived</option>
+          </select>
+          <button onclick="loadAdminCourses()" class="text-sm text-rose-600 font-semibold hover:underline">↻ Refresh</button>
+        </div>
       </div>
       <div class="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <table class="w-full text-sm">
@@ -166,6 +177,33 @@
     </div>
   </div>
 
+  <!-- Archive Course Modal (FR-CM-05) -->
+  <div id="archive-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex">
+    <div class="bg-white rounded-2xl p-6 w-96 shadow-2xl">
+      <h3 class="text-lg font-bold text-slate-800 mb-2">Archive Course</h3>
+      <p class="text-sm text-slate-500 mb-4">Archiving will hide this course from the catalog and prevent further enrollments. Please provide a reason for the audit trail.</p>
+      <p id="archive-course-title" class="text-sm font-semibold text-slate-700 mb-3"></p>
+      <select id="archive-reason"
+        class="w-full border border-slate-200 p-3 rounded-lg text-sm mb-3 outline-none focus:ring-2 focus:ring-rose-300">
+        <option value="">— Select reason —</option>
+        <option value="Inappropriate content">Inappropriate content</option>
+        <option value="Copyright violation">Copyright violation</option>
+        <option value="Misleading information">Misleading information</option>
+        <option value="Spam or low quality">Spam or low quality</option>
+        <option value="Violates platform policies">Violates platform policies</option>
+        <option value="Other">Other</option>
+      </select>
+      <textarea id="archive-notes" placeholder="Additional notes (optional)"
+        class="w-full border border-slate-200 p-3 rounded-lg text-sm h-20 mb-3 outline-none focus:ring-2 focus:ring-rose-300 resize-none"></textarea>
+      <input id="archive-cid" type="hidden">
+      <div class="flex gap-3">
+        <button onclick="confirmArchive()" class="flex-1 bg-rose-600 text-white py-2 rounded-lg font-bold hover:bg-rose-700">Archive</button>
+        <button onclick="closeArchive()" class="flex-1 border border-slate-200 py-2 rounded-lg font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+      </div>
+      <p id="archive-status" class="text-center text-sm font-semibold mt-3"></p>
+    </div>
+  </div>
+
   <script>
     const API   = 'http://localhost:5000/api';
     const token = localStorage.getItem('lms_token');
@@ -194,6 +232,10 @@
       if (tab === 'courses')  loadAdminCourses();
     }
 
+    function escapeQ(s) {
+      return (s || '').replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+    }
+
     // ── Overview ────────────────────────────────────────────────────────
     async function loadOverview() {
       try {
@@ -206,8 +248,8 @@
 
         const students    = users.filter(u => u.role === 'student').length;
         const instructors = users.filter(u => u.role === 'instructor').length;
-        const admins      = users.filter(u => u.role === 'admin').length;
         const published   = courses.filter(c => c.isPublished).length;
+        const archived    = courses.filter(c => c.isArchived).length;
 
         document.getElementById('stats-grid').innerHTML = `
           ${stat(users.length,     'Total Users',       'bg-blue-50 text-blue-600')}
@@ -227,8 +269,8 @@
         document.getElementById('recent-courses').innerHTML = courses.slice(0,5).map(c => `
           <div class="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
             <p class="font-medium text-slate-700 text-sm">${c.title}</p>
-            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${c.isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
-              ${c.isPublished ? 'Live' : 'Draft'}
+            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${c.isArchived ? 'bg-red-50 text-red-600' : c.isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
+              ${c.isArchived ? 'Archived' : c.isPublished ? 'Live' : 'Draft'}
             </span>
           </div>`).join('');
       } catch { /* silent */ }
@@ -295,7 +337,7 @@
                 class="text-xs font-bold px-2 py-1 rounded bg-slate-100 text-slate-600 hover:bg-slate-200">
                 Reset PW
               </button>
-              <button onclick="deleteUser('${u._id}', '${u.name}')"
+              <button onclick="deleteUser('${u._id}', '${escapeQ(u.name)}')"
                 class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
                 Delete
               </button>
@@ -359,39 +401,89 @@
       loadUsers();
     }
 
-    // ── Admin Courses ───────────────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════
+    // ── FR-CM-05: Admin Course Management with Archive ────────────────
+    // ══════════════════════════════════════════════════════════════════
     async function loadAdminCourses() {
       const tbody = document.getElementById('courses-table');
       tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400">Loading...</td></tr>';
       try {
         const res     = await fetch(`${API}/courses/admin/all`, { headers: { Authorization: `Bearer ${token}` } });
         allCourses    = await res.json();
-        tbody.innerHTML = allCourses.map(c => `
-          <tr class="hover:bg-slate-50 transition">
-            <td class="px-6 py-4 font-medium text-slate-800">${c.title}</td>
-            <td class="px-6 py-4 text-slate-500">${c.instructor?.name || 'N/A'}</td>
-            <td class="px-6 py-4 text-slate-500">${c.enrolledStudents?.length || 0}</td>
-            <td class="px-6 py-4">
-              <span class="text-xs font-bold px-2 py-1 rounded-full ${c.isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}">
-                ${c.isPublished ? 'Published' : 'Draft'}
-              </span>
-            </td>
-            <td class="px-6 py-4">
-              <div class="flex gap-2">
-                <button onclick="adminTogglePublish('${c._id}', ${c.isPublished})"
-                  class="text-xs font-bold px-2 py-1 rounded ${c.isPublished ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}">
-                  ${c.isPublished ? 'Unpublish' : 'Publish'}
-                </button>
-                <button onclick="adminDeleteCourse('${c._id}')"
-                  class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
-                  Delete
-                </button>
-              </div>
-            </td>
-          </tr>`).join('');
+        renderCoursesTable(allCourses);
       } catch {
         tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-red-500">Failed to load.</td></tr>';
       }
+    }
+
+    function filterCourses() {
+      const q      = document.getElementById('course-search').value.toLowerCase();
+      const status = document.getElementById('course-status-filter').value;
+      const filtered = allCourses.filter(c => {
+        const matchQ = !q
+          || c.title.toLowerCase().includes(q)
+          || (c.instructor?.name || '').toLowerCase().includes(q)
+          || (c.category || '').toLowerCase().includes(q);
+        let matchStatus = true;
+        if (status === 'published') matchStatus = c.isPublished && !c.isArchived;
+        if (status === 'draft')     matchStatus = !c.isPublished && !c.isArchived;
+        if (status === 'archived')  matchStatus = c.isArchived;
+        return matchQ && matchStatus;
+      });
+      renderCoursesTable(filtered);
+    }
+
+    function renderCoursesTable(courses) {
+      const tbody = document.getElementById('courses-table');
+      if (!courses.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-slate-400">No courses found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = courses.map(c => {
+        const statusBadge = c.isArchived
+          ? `<span class="text-xs font-bold px-2 py-1 rounded-full bg-red-50 text-red-600" title="${escapeQ(c.archiveReason || 'Policy violation')}">Archived</span>`
+          : c.isPublished
+            ? `<span class="text-xs font-bold px-2 py-1 rounded-full bg-emerald-50 text-emerald-600">Published</span>`
+            : `<span class="text-xs font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-600">Draft</span>`;
+
+        const actions = c.isArchived
+          ? `
+            <button onclick="adminUnarchive('${c._id}')"
+              class="text-xs font-bold px-2 py-1 rounded bg-emerald-50 text-emerald-600 hover:bg-emerald-100">
+              Restore
+            </button>
+            <button onclick="adminDeleteCourse('${c._id}','${escapeQ(c.title)}')"
+              class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
+              Delete
+            </button>`
+          : `
+            <button onclick="adminTogglePublish('${c._id}', ${c.isPublished})"
+              class="text-xs font-bold px-2 py-1 rounded ${c.isPublished ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}">
+              ${c.isPublished ? 'Unpublish' : 'Publish'}
+            </button>
+            <button onclick="openArchive('${c._id}','${escapeQ(c.title)}')"
+              class="text-xs font-bold px-2 py-1 rounded bg-orange-50 text-orange-600 hover:bg-orange-100">
+              Archive
+            </button>
+            <button onclick="adminDeleteCourse('${c._id}','${escapeQ(c.title)}')"
+              class="text-xs font-bold px-2 py-1 rounded bg-red-50 text-red-500 hover:bg-red-100">
+              Delete
+            </button>`;
+
+        return `
+          <tr class="hover:bg-slate-50 transition ${c.isArchived ? 'opacity-60' : ''}">
+            <td class="px-6 py-4">
+              <div class="font-medium text-slate-800">${c.title}</div>
+              ${c.isArchived ? `<div class="text-xs text-red-500 mt-1">Reason: ${c.archiveReason || 'N/A'}</div>` : ''}
+            </td>
+            <td class="px-6 py-4 text-slate-500">${c.instructor?.name || 'N/A'}</td>
+            <td class="px-6 py-4 text-slate-500">${c.enrolledStudents?.length || 0}</td>
+            <td class="px-6 py-4">${statusBadge}</td>
+            <td class="px-6 py-4">
+              <div class="flex gap-2 flex-wrap">${actions}</div>
+            </td>
+          </tr>`;
+      }).join('');
     }
 
     async function adminTogglePublish(id, current) {
@@ -403,8 +495,61 @@
       loadAdminCourses();
     }
 
-    async function adminDeleteCourse(id) {
-      if (!confirm('Delete this course permanently?')) return;
+    // Archive flow with reason capture (FR-CM-05)
+    function openArchive(id, title) {
+      document.getElementById('archive-cid').value           = id;
+      document.getElementById('archive-course-title').innerText = title;
+      document.getElementById('archive-reason').value        = '';
+      document.getElementById('archive-notes').value         = '';
+      document.getElementById('archive-status').innerText    = '';
+      document.getElementById('archive-modal').classList.remove('hidden');
+    }
+    function closeArchive() { document.getElementById('archive-modal').classList.add('hidden'); }
+
+    async function confirmArchive() {
+      const id     = document.getElementById('archive-cid').value;
+      const reason = document.getElementById('archive-reason').value;
+      const notes  = document.getElementById('archive-notes').value.trim();
+      const st     = document.getElementById('archive-status');
+
+      if (!reason) {
+        st.className = 'text-center text-sm font-semibold text-red-500 mt-3';
+        st.innerText = 'Please select a reason.'; return;
+      }
+
+      const fullReason = notes ? `${reason} — ${notes}` : reason;
+      try {
+        const res  = await fetch(`${API}/courses/admin/${id}/archive`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ reason: fullReason })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message);
+        st.className = 'text-center text-sm font-semibold text-emerald-600 mt-3';
+        st.innerText = 'Course archived.';
+        setTimeout(() => { closeArchive(); loadAdminCourses(); }, 800);
+      } catch (err) {
+        st.className = 'text-center text-sm font-semibold text-red-500 mt-3';
+        st.innerText = err.message || 'Archive failed.';
+      }
+    }
+
+    async function adminUnarchive(id) {
+      if (!confirm('Restore this course? It will return to draft status.')) return;
+      try {
+        await fetch(`${API}/courses/admin/${id}/unarchive`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        loadAdminCourses();
+      } catch {
+        alert('Restore failed.');
+      }
+    }
+
+    async function adminDeleteCourse(id, title) {
+      if (!confirm(`Permanently delete "${title}"? This cannot be undone. For policy violations, prefer Archive.`)) return;
       await fetch(`${API}/courses/${id}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` }
       });

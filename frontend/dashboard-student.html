@@ -49,12 +49,35 @@
         <h2 class="text-2xl font-extrabold text-slate-800">Available Courses</h2>
         <button onclick="loadAllCourses()" class="text-sm text-indigo-600 font-semibold hover:underline">↻ Refresh</button>
       </div>
+
+      <!-- Search + filter -->
+      <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-6 flex flex-col md:flex-row gap-3">
+        <div class="flex-1">
+          <input id="search-input" type="text"
+            placeholder="🔍 Search courses by title, description, or category..."
+            oninput="debouncedSearch()"
+            class="w-full border border-slate-200 px-4 py-2.5 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400 outline-none">
+        </div>
+        <select id="category-filter" onchange="loadAllCourses()"
+          class="border border-slate-200 px-3 py-2.5 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400 min-w-[180px]">
+          <option value="all">All Categories</option>
+        </select>
+        <button onclick="clearSearch()"
+          class="text-sm font-semibold text-slate-500 hover:text-slate-700 px-3">
+          Clear
+        </button>
+      </div>
+
+      <div id="result-count" class="text-xs text-slate-400 mb-3"></div>
       <div id="course-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     </div>
 
     <!-- My Enrollments Tab -->
     <div id="pane-my-courses" class="hidden">
-      <h2 class="text-2xl font-extrabold text-slate-800 mb-6">My Enrolled Courses</h2>
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-extrabold text-slate-800">My Enrolled Courses</h2>
+        <button onclick="loadEnrolled()" class="text-sm text-indigo-600 font-semibold hover:underline">↻ Refresh</button>
+      </div>
       <div id="enrolled-list" class="grid grid-cols-1 md:grid-cols-2 gap-6"></div>
     </div>
 
@@ -66,20 +89,36 @@
 
   </main>
 
-  <!-- Enroll Modal -->
-  <div id="enroll-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex">
-    <div class="bg-white rounded-2xl p-6 w-96 shadow-2xl">
-      <h3 id="modal-title" class="text-lg font-bold text-slate-800 mb-2"></h3>
-      <p id="modal-desc" class="text-sm text-slate-500 mb-4"></p>
-      <div class="flex gap-3">
-        <button onclick="confirmEnroll()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold hover:bg-indigo-700">
-          Enroll Now
-        </button>
-        <button onclick="closeModal()" class="flex-1 border border-slate-200 text-slate-600 py-2 rounded-lg font-bold hover:bg-slate-50">
-          Cancel
-        </button>
+  <!-- ═══ Course Detail Modal (preview before enrolling / learning mode after) ═══ -->
+  <div id="detail-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50 flex p-4">
+    <div class="bg-white rounded-2xl w-full max-w-2xl shadow-2xl max-h-[90vh] flex flex-col">
+      <!-- Header -->
+      <div class="p-6 border-b border-slate-100 flex justify-between items-start">
+        <div class="flex-1 pr-4">
+          <span id="dm-category" class="text-[10px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full"></span>
+          <h2 id="dm-title" class="text-2xl font-extrabold text-slate-800 mt-3"></h2>
+          <p id="dm-instructor" class="text-sm text-slate-500 mt-1"></p>
+        </div>
+        <button onclick="closeDetail()" class="text-slate-400 hover:text-slate-700 text-3xl leading-none">×</button>
       </div>
-      <p id="modal-status" class="text-center text-sm font-semibold mt-3"></p>
+
+      <!-- Scrollable content -->
+      <div class="p-6 overflow-y-auto flex-1">
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">About this course</h3>
+        <p id="dm-description" class="text-sm text-slate-700 leading-relaxed mb-6 whitespace-pre-wrap"></p>
+
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Course Content</h3>
+        <div id="dm-modules" class="space-y-2 mb-6"></div>
+
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Assignments</h3>
+        <div id="dm-assignments" class="space-y-2"></div>
+      </div>
+
+      <!-- Footer with action button -->
+      <div class="p-6 border-t border-slate-100 bg-slate-50/50 rounded-b-2xl">
+        <div id="dm-footer"></div>
+        <p id="dm-status" class="text-center text-sm font-semibold mt-2"></p>
+      </div>
     </div>
   </div>
 
@@ -93,7 +132,9 @@
     }
     document.getElementById('userName').innerText = user.name;
 
-    let selectedCourseId = null;
+    // Cache of enrolled course IDs for fast badge lookup
+    let enrolledIds = new Set();
+    let currentDetailCourseId = null;
 
     // ── Tab management ──────────────────────────────────────────────────
     function showTab(tab) {
@@ -111,63 +152,259 @@
       if (tab === 'summary')    loadSummary();
     }
 
-    // ── Browse Courses ──────────────────────────────────────────────────
+    // ── Fetch enrolled course IDs (used to show "Enrolled" badges) ──────
+    async function refreshEnrolledIds() {
+      try {
+        const res     = await fetch(`${API}/courses/student/my-courses`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const courses = await res.json();
+        enrolledIds   = new Set(courses.map(c => c._id));
+      } catch { /* silent */ }
+    }
+
+    // ── Browse + Search ─────────────────────────────────────────────────
+    let searchDebounceTimer = null;
+    function debouncedSearch() {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(loadAllCourses, 300);
+    }
+
+    function clearSearch() {
+      document.getElementById('search-input').value = '';
+      document.getElementById('category-filter').value = 'all';
+      loadAllCourses();
+    }
+
+    async function loadCategories() {
+      try {
+        const res  = await fetch(`${API}/courses/categories`);
+        const cats = await res.json();
+        const sel  = document.getElementById('category-filter');
+        sel.innerHTML = '<option value="all">All Categories</option>' +
+          cats.map(c => `<option value="${c}">${c}</option>`).join('');
+      } catch { /* silent */ }
+    }
+
     async function loadAllCourses() {
       const grid = document.getElementById('course-grid');
+      const meta = document.getElementById('result-count');
+      const q    = document.getElementById('search-input').value.trim();
+      const cat  = document.getElementById('category-filter').value;
+
       grid.innerHTML = '<p class="text-slate-400 col-span-3 text-center py-10">Loading...</p>';
+      meta.innerText = '';
+
       try {
-        const res     = await fetch(`${API}/courses/all`);
+        // Refresh enrolled IDs FIRST so badges render correctly
+        await refreshEnrolledIds();
+
+        const params = new URLSearchParams();
+        if (q)   params.append('q', q);
+        if (cat && cat !== 'all') params.append('category', cat);
+
+        const url = `${API}/courses/all${params.toString() ? '?' + params.toString() : ''}`;
+        const res     = await fetch(url);
         const courses = await res.json();
+
+        if (q || (cat && cat !== 'all')) {
+          meta.innerText = `${courses.length} result${courses.length !== 1 ? 's' : ''} found${q ? ` for "${q}"` : ''}`;
+        }
+
         if (!courses.length) {
-          grid.innerHTML = '<p class="col-span-3 text-center text-slate-400 py-10">No courses published yet.</p>';
+          grid.innerHTML = `<div class="col-span-3 text-center py-12 bg-white rounded-2xl border-2 border-dashed border-slate-200">
+            <p class="text-slate-400">${q || cat !== 'all' ? 'No courses match your search.' : 'No courses published yet.'}</p>
+          </div>`;
           return;
         }
-        grid.innerHTML = courses.map(c => `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 hover:shadow-md transition">
-            <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">
-              ${c.category || 'General'}
-            </span>
-            <h3 class="text-lg font-bold text-slate-800 mt-3 mb-1">${c.title}</h3>
-            <p class="text-sm text-slate-500 line-clamp-2">${c.description}</p>
-            <div class="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
-              <span class="text-xs text-slate-400">by ${c.instructor?.name || 'Unknown'}</span>
-              <button onclick="openEnrollModal('${c._id}','${c.title}','${c.description.replace(/'/g,"&#39;")}')"
-                class="text-sm font-bold text-indigo-600 hover:text-indigo-800">
-                Enroll →
-              </button>
-            </div>
-          </div>
-        `).join('');
+
+        grid.innerHTML = courses.map(c => {
+          const isEnrolled = enrolledIds.has(c._id);
+          return `
+            <div onclick="openDetail('${c._id}')"
+              class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 hover:shadow-md hover:border-indigo-200 transition cursor-pointer relative">
+              ${isEnrolled
+                ? `<span class="absolute top-4 right-4 text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">✓ Enrolled</span>`
+                : ''}
+              <span class="text-[10px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">
+                ${c.category || 'General'}
+              </span>
+              <h3 class="text-lg font-bold text-slate-800 mt-3 mb-1">${c.title}</h3>
+              <p class="text-sm text-slate-500 line-clamp-2">${c.description}</p>
+              <p class="text-xs text-slate-400 mt-2">${c.modules?.length || 0} learning module(s)</p>
+              <div class="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
+                <span class="text-xs text-slate-400">by ${c.instructor?.name || 'Unknown'}</span>
+                <span class="text-sm font-bold ${isEnrolled ? 'text-emerald-600' : 'text-indigo-600'}">View Details →</span>
+              </div>
+            </div>`;
+        }).join('');
       } catch {
         grid.innerHTML = '<p class="col-span-3 text-center text-red-500">Failed to load courses.</p>';
       }
     }
 
-    function openEnrollModal(id, title, desc) {
-      selectedCourseId = id;
-      document.getElementById('modal-title').innerText = title;
-      document.getElementById('modal-desc').innerText  = desc;
-      document.getElementById('modal-status').innerText = '';
-      document.getElementById('enroll-modal').classList.remove('hidden');
+    // ── Course Detail Modal (preview / learning view) ───────────────────
+    async function openDetail(courseId) {
+      currentDetailCourseId = courseId;
+      const modal = document.getElementById('detail-modal');
+      modal.classList.remove('hidden');
+
+      // Reset content while loading
+      document.getElementById('dm-title').innerText       = 'Loading...';
+      document.getElementById('dm-category').innerText    = '';
+      document.getElementById('dm-instructor').innerText  = '';
+      document.getElementById('dm-description').innerText = '';
+      document.getElementById('dm-modules').innerHTML     = '';
+      document.getElementById('dm-assignments').innerHTML = '';
+      document.getElementById('dm-footer').innerHTML      = '';
+      document.getElementById('dm-status').innerText      = '';
+
+      try {
+        const res    = await fetch(`${API}/courses/${courseId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const course = await res.json();
+        renderDetail(course);
+      } catch {
+        document.getElementById('dm-title').innerText = 'Failed to load course details.';
+      }
     }
-    function closeModal() {
-      document.getElementById('enroll-modal').classList.add('hidden');
+
+    function renderDetail(c) {
+      const isEnrolled = enrolledIds.has(c._id);
+
+      document.getElementById('dm-category').innerText    = c.category || 'General';
+      document.getElementById('dm-title').innerText       = c.title;
+      document.getElementById('dm-instructor').innerText  = `Instructor: ${c.instructor?.name || 'Unknown'}`;
+      document.getElementById('dm-description').innerText = c.description || 'No description provided.';
+
+      // Modules — expandable accordion; content gated by enrollment
+      const modulesEl = document.getElementById('dm-modules');
+      if (!c.modules?.length) {
+        modulesEl.innerHTML = '<p class="text-sm text-slate-400 italic">No learning modules added yet.</p>';
+      } else {
+        modulesEl.innerHTML = c.modules.map((m, i) => `
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <button onclick="toggleModule('mod-${i}')"
+              class="w-full text-left px-4 py-3 bg-slate-50 hover:bg-slate-100 transition flex justify-between items-center">
+              <div>
+                <span class="text-xs font-bold text-indigo-600">MODULE ${i+1}</span>
+                <span class="text-sm font-semibold text-slate-800 ml-2">${m.title}</span>
+              </div>
+              <span id="mod-${i}-arrow" class="text-slate-400 text-sm">▼</span>
+            </button>
+            <div id="mod-${i}" class="hidden px-4 py-3 bg-white border-t border-slate-100">
+              ${isEnrolled
+                ? `<p class="text-sm text-slate-600 whitespace-pre-wrap">${m.content || '(No content provided for this module)'}</p>`
+                : `<p class="text-sm text-slate-400 italic">🔒 Enroll to access module content</p>`}
+            </div>
+          </div>
+        `).join('');
+      }
+
+      // Assignments
+      const assignEl = document.getElementById('dm-assignments');
+      if (!c.assignments?.length) {
+        assignEl.innerHTML = '<p class="text-sm text-slate-400 italic">No assignments yet.</p>';
+      } else {
+        assignEl.innerHTML = c.assignments.map(a => {
+          const due = a.dueDate ? new Date(a.dueDate).toLocaleDateString() : 'No due date';
+          // Has this student submitted?
+          let statusBadge = '';
+          if (isEnrolled) {
+            const mySub = a.submissions?.find(s => {
+              const sid = s.student?._id || s.student;
+              return sid && sid.toString() === user.id.toString();
+            });
+            if (mySub && mySub.grade !== null && mySub.grade !== undefined) {
+              statusBadge = `<span class="text-[10px] font-bold bg-emerald-50 text-emerald-600 px-2 py-1 rounded-full whitespace-nowrap">Graded: ${mySub.grade}</span>`;
+            } else if (mySub) {
+              statusBadge = `<span class="text-[10px] font-bold bg-blue-50 text-blue-600 px-2 py-1 rounded-full whitespace-nowrap">Submitted</span>`;
+            } else {
+              statusBadge = `<span class="text-[10px] font-bold bg-amber-50 text-amber-600 px-2 py-1 rounded-full whitespace-nowrap">Pending</span>`;
+            }
+          }
+          return `
+            <div class="border border-slate-200 rounded-lg p-3 flex justify-between items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-slate-800">${a.title}</p>
+                <p class="text-xs text-slate-400 mt-0.5">Due: ${due}</p>
+                ${a.description ? `<p class="text-xs text-slate-500 mt-1">${a.description}</p>` : ''}
+              </div>
+              ${statusBadge}
+            </div>`;
+        }).join('');
+      }
+
+      // Footer action button — changes based on enrollment state
+      const footerEl = document.getElementById('dm-footer');
+      if (isEnrolled) {
+        footerEl.innerHTML = `
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm font-bold text-emerald-600 flex items-center gap-2">
+              <span class="text-lg">✓</span> You are enrolled
+            </span>
+            <button onclick="closeDetail()"
+              class="bg-slate-200 text-slate-700 px-6 py-2 rounded-lg font-bold hover:bg-slate-300 transition">
+              Close
+            </button>
+          </div>`;
+      } else {
+        footerEl.innerHTML = `
+          <div class="flex items-center justify-between gap-3">
+            <button onclick="closeDetail()"
+              class="flex-1 border border-slate-200 text-slate-600 py-3 rounded-lg font-bold hover:bg-slate-50">
+              Cancel
+            </button>
+            <button onclick="confirmEnroll()"
+              class="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100">
+              Enroll Now
+            </button>
+          </div>`;
+      }
+    }
+
+    function toggleModule(id) {
+      const el    = document.getElementById(id);
+      const arrow = document.getElementById(id + '-arrow');
+      if (el.classList.contains('hidden')) {
+        el.classList.remove('hidden');
+        arrow.innerText = '▲';
+      } else {
+        el.classList.add('hidden');
+        arrow.innerText = '▼';
+      }
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-modal').classList.add('hidden');
+      currentDetailCourseId = null;
     }
 
     async function confirmEnroll() {
-      const st = document.getElementById('modal-status');
+      const st = document.getElementById('dm-status');
       try {
-        const res  = await fetch(`${API}/courses/${selectedCourseId}/enroll`, {
+        const res  = await fetch(`${API}/courses/${currentDetailCourseId}/enroll`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` }
         });
         const data = await res.json();
-        st.className = res.ok ? 'text-center text-sm font-semibold mt-3 text-emerald-600'
-                               : 'text-center text-sm font-semibold mt-3 text-red-500';
+        st.className = res.ok ? 'text-center text-sm font-semibold mt-2 text-emerald-600'
+                               : 'text-center text-sm font-semibold mt-2 text-red-500';
         st.innerText = data.message;
-        if (res.ok) setTimeout(closeModal, 1200);
+        if (res.ok) {
+          enrolledIds.add(currentDetailCourseId);
+          // Re-render the modal in enrolled state, then refresh grid in background
+          setTimeout(async () => {
+            const r = await fetch(`${API}/courses/${currentDetailCourseId}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            renderDetail(await r.json());
+            loadAllCourses();
+          }, 800);
+        }
       } catch {
-        st.className = 'text-center text-sm font-semibold mt-3 text-red-500';
+        st.className = 'text-center text-sm font-semibold mt-2 text-red-500';
         st.innerText = 'Enrollment failed.';
       }
     }
@@ -177,27 +414,34 @@
       const list = document.getElementById('enrolled-list');
       list.innerHTML = '<p class="text-slate-400 col-span-2 text-center py-10">Loading...</p>';
       try {
+        await refreshEnrolledIds();
+
         const res     = await fetch(`${API}/courses/student/my-courses`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const courses = await res.json();
         if (!courses.length) {
-          list.innerHTML = '<p class="col-span-2 text-center text-slate-400 py-10">You have not enrolled in any courses yet.</p>';
+          list.innerHTML = `<div class="col-span-2 text-center py-16 bg-white rounded-2xl border-2 border-dashed border-slate-200">
+            <p class="text-slate-400">You have not enrolled in any courses yet.</p>
+            <button onclick="showTab('browse')" class="mt-3 text-sm font-bold text-indigo-600 hover:underline">Browse courses →</button>
+          </div>`;
           return;
         }
         list.innerHTML = courses.map(c => `
-          <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+          <div onclick="openDetail('${c._id}')"
+            class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 hover:shadow-md hover:border-indigo-200 transition cursor-pointer">
             <h3 class="text-lg font-bold text-slate-800">${c.title}</h3>
-            <p class="text-sm text-slate-500 mt-1">${c.description}</p>
+            <p class="text-sm text-slate-500 mt-1 line-clamp-2">${c.description}</p>
             <div class="mt-4 flex items-center justify-between">
               <span class="text-xs text-slate-400">Instructor: ${c.instructor?.name || 'N/A'}</span>
-              <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">Enrolled</span>
+              <span class="text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">✓ Enrolled</span>
             </div>
-            <div class="mt-4 border-t pt-4">
-              <p class="text-xs font-bold text-slate-500 mb-2">MODULES (${c.modules?.length || 0})</p>
-              ${c.modules?.length
-                ? c.modules.map(m => `<p class="text-sm text-slate-600 py-1 border-b border-slate-50">📖 ${m.title}</p>`).join('')
-                : '<p class="text-sm text-slate-400">No modules yet.</p>'}
+            <div class="mt-4 border-t pt-4 flex items-center justify-between">
+              <p class="text-xs text-slate-500">
+                <span class="font-bold">${c.modules?.length || 0}</span> module${c.modules?.length !== 1 ? 's' : ''}
+                · <span class="font-bold">${c.assignments?.length || 0}</span> assignment${c.assignments?.length !== 1 ? 's' : ''}
+              </p>
+              <span class="text-sm font-bold text-indigo-600">Open Course →</span>
             </div>
           </div>
         `).join('');
@@ -248,6 +492,7 @@
     function logout() { localStorage.clear(); window.location.href = 'index.html'; }
 
     // Initial load
+    loadCategories();
     loadAllCourses();
   </script>
 </body>

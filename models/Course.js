@@ -36,6 +36,11 @@ const courseSchema = new mongoose.Schema({
   instructor:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   isPublished: { type: Boolean, default: false },
 
+  // FR-CM-05: Admin can archive a course for policy violations (soft remove)
+  isArchived:    { type: Boolean, default: false },
+  archiveReason: { type: String, default: '' },
+  archivedAt:    { type: Date, default: null },
+
   modules:     [moduleSchema],
   assignments: [assignmentSchema],
   quizzes:     [quizSchema],

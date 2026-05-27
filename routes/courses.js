@@ -5,13 +5,49 @@ const Course   = require('../models/Course');
 const User     = require('../models/User');
 const { protect, authorize } = require('../middleware/auth');
 
-// ─── GET /api/courses/all  — browse published courses (student/public) ───
+// ══════════════════════════════════════════════════════════════════════════
+//  FR-CM-03 — Course Discovery (browse + search)
+// ══════════════════════════════════════════════════════════════════════════
+
+// GET /api/courses/all  — browse published courses with optional search/filter
+// Query params: ?q=keyword&category=Programming
 router.get('/all', async (req, res) => {
   try {
-    const courses = await Course.find({ isPublished: true })
+    const { q, category } = req.query;
+
+    // Only show courses that are published AND not archived
+    const filter = { isPublished: true, isArchived: { $ne: true } };
+
+    if (category && category !== 'all') {
+      filter.category = category;
+    }
+
+    if (q && q.trim()) {
+      const regex = new RegExp(q.trim(), 'i'); // case-insensitive
+      filter.$or = [
+        { title:       regex },
+        { description: regex },
+        { category:    regex },
+      ];
+    }
+
+    const courses = await Course.find(filter)
       .populate('instructor', 'name email')
       .sort({ createdAt: -1 });
     res.json(courses);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/courses/categories  — distinct list of categories (for filter UI)
+router.get('/categories', async (req, res) => {
+  try {
+    const cats = await Course.distinct('category', {
+      isPublished: true,
+      isArchived: { $ne: true },
+    });
+    res.json(cats.filter(Boolean).sort());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -54,14 +90,25 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-// ─── POST /api/courses/add  — instructor creates course ──────────────────
+// ══════════════════════════════════════════════════════════════════════════
+//  FR-CM-01 / FR-CM-02 — Course Creation & Curriculum Storage
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/courses/add  — instructor creates course with learning modules
 router.post('/add', protect, authorize('instructor', 'admin'), async (req, res) => {
   try {
     const { title, description, category, modules } = req.body;
+
+    if (!title || !description) {
+      return res.status(400).json({ message: 'Title and description are required.' });
+    }
+
     const course = new Course({
-      title, description, category,
+      title,
+      description,
+      category: category || 'General',
       instructor: req.user.id,
-      modules: modules || [],
+      modules: Array.isArray(modules) ? modules : [],
     });
     await course.save();
 
@@ -87,10 +134,85 @@ router.put('/:id', protect, authorize('instructor', 'admin'), async (req, res) =
       return res.status(403).json({ message: 'Not your course.' });
     }
 
-    const updates = req.body;
-    Object.assign(course, updates);
+    // Whitelist editable fields to prevent tampering with isArchived, instructor, etc.
+    const allowed = ['title', 'description', 'category'];
+    allowed.forEach(k => {
+      if (req.body[k] !== undefined) course[k] = req.body[k];
+    });
+
     await course.save();
     res.json({ message: 'Course updated.', course });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  FR-CM-01 — Module Management (add / update / delete modules)
+// ══════════════════════════════════════════════════════════════════════════
+
+// POST /api/courses/:id/modules  — add a module to existing course
+router.post('/:id/modules', protect, authorize('instructor', 'admin'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Course not found.' });
+
+    if (req.user.role !== 'admin' && course.instructor.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not your course.' });
+    }
+
+    const { title, content } = req.body;
+    if (!title) return res.status(400).json({ message: 'Module title is required.' });
+
+    course.modules.push({
+      title,
+      content: content || '',
+      order: course.modules.length,
+    });
+    await course.save();
+    res.json({ message: 'Module added.', course });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/courses/:id/modules/:moduleId  — update a module
+router.put('/:id/modules/:moduleId', protect, authorize('instructor', 'admin'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Course not found.' });
+
+    if (req.user.role !== 'admin' && course.instructor.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not your course.' });
+    }
+
+    const mod = course.modules.id(req.params.moduleId);
+    if (!mod) return res.status(404).json({ message: 'Module not found.' });
+
+    if (req.body.title   !== undefined) mod.title   = req.body.title;
+    if (req.body.content !== undefined) mod.content = req.body.content;
+    if (req.body.order   !== undefined) mod.order   = req.body.order;
+
+    await course.save();
+    res.json({ message: 'Module updated.', course });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/courses/:id/modules/:moduleId  — remove a module
+router.delete('/:id/modules/:moduleId', protect, authorize('instructor', 'admin'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Course not found.' });
+
+    if (req.user.role !== 'admin' && course.instructor.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Not your course.' });
+    }
+
+    course.modules.pull({ _id: req.params.moduleId });
+    await course.save();
+    res.json({ message: 'Module removed.', course });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -104,6 +226,10 @@ router.patch('/:id/publish', protect, authorize('instructor', 'admin'), async (r
 
     if (req.user.role !== 'admin' && course.instructor.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Not your course.' });
+    }
+
+    if (course.isArchived) {
+      return res.status(400).json({ message: 'Cannot publish an archived course.' });
     }
 
     course.isPublished = !course.isPublished;
@@ -132,7 +258,7 @@ router.delete('/:id', protect, authorize('instructor', 'admin'), async (req, res
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  STUDENT: Enrollment
+//  FR-CM-04 — STUDENT: Enrollment
 // ══════════════════════════════════════════════════════════════════════════
 
 // POST /api/courses/:id/enroll
@@ -141,6 +267,7 @@ router.post('/:id/enroll', protect, authorize('student'), async (req, res) => {
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ message: 'Course not found.' });
     if (!course.isPublished) return res.status(400).json({ message: 'Course is not available.' });
+    if (course.isArchived)   return res.status(400).json({ message: 'Course has been archived and is no longer enrollable.' });
 
     if (course.enrolledStudents.includes(req.user.id)) {
       return res.status(409).json({ message: 'Already enrolled.' });
@@ -228,7 +355,7 @@ router.post('/:id/assignments', protect, authorize('instructor', 'admin'), async
   }
 });
 
-// PATCH /api/courses/:courseId/assignments/:assignmentId/grade/:studentId  — grade a submission
+// PATCH /api/courses/:courseId/assignments/:assignmentId/grade/:studentId
 router.patch(
   '/:courseId/assignments/:assignmentId/grade/:studentId',
   protect,
@@ -277,10 +404,45 @@ router.post('/:id/quizzes', protect, authorize('instructor', 'admin'), async (re
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  ADMIN: Course-level management
+//  FR-CM-05 — ADMIN: archive / unarchive / remove courses for policy violations
 // ══════════════════════════════════════════════════════════════════════════
 
-// PATCH /api/courses/admin/:id/force-publish
+// PATCH /api/courses/admin/:id/archive  — soft-remove a course
+// Body: { reason: "Reason text" }
+router.patch('/admin/:id/archive', protect, authorize('admin'), async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Course not found.' });
+
+    course.isArchived    = true;
+    course.archiveReason = reason || 'Policy violation';
+    course.archivedAt    = new Date();
+    course.isPublished   = false; // hide from catalog immediately
+    await course.save();
+    res.json({ message: 'Course archived.', course });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/courses/admin/:id/unarchive  — restore an archived course
+router.patch('/admin/:id/unarchive', protect, authorize('admin'), async (req, res) => {
+  try {
+    const course = await Course.findById(req.params.id);
+    if (!course) return res.status(404).json({ message: 'Course not found.' });
+
+    course.isArchived    = false;
+    course.archiveReason = '';
+    course.archivedAt    = null;
+    await course.save();
+    res.json({ message: 'Course restored.', course });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/courses/admin/:id/force-publish  — admin override publish toggle
 router.patch('/admin/:id/force-publish', protect, authorize('admin'), async (req, res) => {
   try {
     const { isPublished } = req.body;
